@@ -13,9 +13,14 @@ import {
   HandLandmarkerResult,
 } from '@mediapipe/tasks-vision';
 
-import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
-
 import { HAND_CONNECTIONS } from '@mediapipe/hands';
+
+interface DrawingOptions {
+  color?: string;
+  fillColor?: string;
+  lineWidth?: number;
+  radius?: number;
+}
 
 @Component({
   selector: 'app-root',
@@ -33,38 +38,30 @@ export class AppComponent implements OnInit {
   canvasCtx = computed(() => this.canvasElement().getContext('2d'));
   lastVideoTime = signal(-1);
   results = signal<HandLandmarkerResult | null>(null);
+  animationStartTime: number | null = null; // Track animation start time
 
   createHandLandmarker = async () => {
     try {
-      // Add try...catch for better error reporting
-      const vision = await FilesetResolver.forVisionTasks(
-        '/wasm'
-      );
+      const vision = await FilesetResolver.forVisionTasks('/wasm');
       const handLandmarker = await HandLandmarker.createFromOptions(vision, {
         baseOptions: {
-          modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task`,
+          modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
           delegate: 'GPU',
         },
         runningMode: 'VIDEO',
         numHands: 2,
       });
       this.handLandmarker.set(handLandmarker);
-      console.log(
-        '✅ HandLandmarker created and set successfully:',
-        this.handLandmarker()
-      ); // <-- ADD LOG
     } catch (error) {
-      console.error('❌ Failed to create HandLandmarker:', error); // <-- ADD ERROR LOGGING
+      console.error('❌ Failed to create HandLandmarker:', error);
     }
   };
 
   hasGetUserMedia = () => !!navigator.mediaDevices?.getUserMedia;
 
   async ngOnInit() {
-    console.log('ini', this.canvasElement());
     await this.createHandLandmarker();
 
-    // check if webcam is supported
     if (!this.hasGetUserMedia()) {
       console.warn('getUserMedia() is not supported by your browser');
     }
@@ -75,32 +72,24 @@ export class AppComponent implements OnInit {
 
     this.start();
   }
-  predictWebcam = async () => {
-    // Add this log right at the beginning
-    console.log('🔄 predictWebcam loop running - Time:', performance.now());
 
-    // --- Keep the existing checks for canvasRef/videoRef ---
+  predictWebcam = async () => {
     if (!this.canvasRef() || !this.videoRef()) {
-      console.warn('Canvas or Video element not ready yet.');
       window.requestAnimationFrame(this.predictWebcam);
       return;
     }
-    // --- End checks ---
 
     const video = this.video();
     const canvasElement = this.canvasElement();
     const canvasCtx = this.canvasCtx();
     const handLandmarker = this.handLandmarker();
 
-    // --- Keep existing check for canvasCtx ---
     if (!canvasCtx) {
       console.error('Canvas context not available');
       window.requestAnimationFrame(this.predictWebcam);
       return;
     }
-    // --- End check ---
 
-    // --- Keep existing canvas resizing ---
     if (
       canvasElement.width !== video.videoWidth ||
       canvasElement.height !== video.videoHeight
@@ -109,58 +98,50 @@ export class AppComponent implements OnInit {
       canvasElement.style.height = `${video.videoHeight}px`;
       canvasElement.width = video.videoWidth;
       canvasElement.height = video.videoHeight;
-      // console.log('Canvas resized to:', video.videoWidth, video.videoHeight); // Optional log
     }
-    // --- End resizing ---
 
     if (handLandmarker && video.readyState >= video.HAVE_CURRENT_DATA) {
       let startTimeMs = performance.now();
       if (this.lastVideoTime() !== video.currentTime) {
         this.lastVideoTime.set(video.currentTime);
 
-        // Log BEFORE detection
-        console.log('▶️ Calling detectForVideo...');
-
         const results = handLandmarker.detectForVideo(video, startTimeMs);
-
-        // Log AFTER detection - THIS IS VERY IMPORTANT
-        console.log('🖐️ Detection results:', JSON.stringify(results)); // Use JSON.stringify for cleaner log
 
         this.results.set(results);
 
-        // --- Drawing logic ---
         canvasCtx.save();
         canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
         if (results.landmarks && results.landmarks.length > 0) {
-          // Log if drawing should happen
-          console.log(`🎨 Drawing ${results.landmarks.length} hands.`);
           for (const landmarks of results.landmarks) {
-            drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
+            this.customDrawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {
               color: 'lime',
-            }); // Use named color, omit lineWidth
-            drawLandmarks(canvasCtx, landmarks, { color: 'red', radius: 3 }); // Use radius instead of lineWidth
+            });
+            this.customDrawLandmarks(canvasCtx, landmarks, {
+              color: 'red',
+              radius: 3,
+            });
+
+            if (this.isHandOpen(landmarks)) {
+              if (this.animationStartTime === null) {
+                this.animationStartTime = performance.now(); // Start animation timer
+              }
+              this.animateRoseBloom(canvasCtx, landmarks[9].x * canvasElement.width, landmarks[9].y * canvasElement.height);
+            } else {
+              this.animationStartTime = null; // Reset animation when hands are closed
+            }
           }
-        } else {
-          // Log if NO landmarks are found
-          console.log('🚫 No landmarks detected in this frame.'); // Optional, can be noisy
         }
         canvasCtx.restore();
-        // --- End Drawing ---
-      } else {
-        // Optional log: See if the time check is preventing detection
-        // console.log('Video time unchanged, skipping detection');
       }
     } else if (!handLandmarker) {
       console.warn('HandLandmarker not ready yet in loop.');
     } else if (video.readyState < video.HAVE_CURRENT_DATA) {
-      // console.warn("Video data not ready yet."); // Optional log
     }
 
     window.requestAnimationFrame(this.predictWebcam);
   };
 
-  // Also add a log to confirm getUserMedia success
   start() {
     const constraints = {
       video: true,
@@ -168,13 +149,91 @@ export class AppComponent implements OnInit {
     navigator.mediaDevices
       .getUserMedia(constraints)
       .then((stream) => {
-        console.log('🚀 Webcam stream obtained!'); // <-- ADD THIS LOG
         this.video().srcObject = stream;
         this.video().addEventListener('loadeddata', this.predictWebcam);
       })
       .catch((err) => {
-        // Add catch for getUserMedia errors
         console.error('❌ Failed to get webcam stream:', err);
       });
+  }
+
+  customDrawConnectors(
+    ctx: CanvasRenderingContext2D,
+    landmarks: any[],
+    connections: number[][],
+    options: DrawingOptions
+  ) {
+    if (!ctx) return;
+
+    ctx.strokeStyle = options.color || 'black';
+    ctx.lineWidth = options.lineWidth || 1;
+
+    for (const connection of connections) {
+      const from = landmarks[connection[0]];
+      const to = landmarks[connection[1]];
+
+      if (from && to) {
+        ctx.beginPath();
+        ctx.moveTo(from.x * ctx.canvas.width, from.y * ctx.canvas.height);
+        ctx.lineTo(to.x * ctx.canvas.width, to.y * ctx.canvas.height);
+        ctx.stroke();
+      }
+    }
+  }
+
+  customDrawLandmarks(
+    ctx: CanvasRenderingContext2D,
+    landmarks: any[],
+    options: DrawingOptions
+  ) {
+    if (!ctx) return;
+
+    ctx.fillStyle = options.color || 'black';
+
+    for (const landmark of landmarks) {
+      ctx.beginPath();
+      ctx.arc(
+        landmark.x * ctx.canvas.width,
+        landmark.y * ctx.canvas.height,
+        options.radius || 2,
+        0,
+        2 * Math.PI
+      );
+      ctx.fill();
+    }
+  }
+
+  isHandOpen(landmarks: any[]): boolean {
+    const thumbTip = landmarks[4];
+    const indexTip = landmarks[8];
+    if (!thumbTip || !indexTip) return false;
+    const distance = Math.sqrt(
+      Math.pow(thumbTip.x - indexTip.x, 2) + Math.pow(thumbTip.y - indexTip.y, 2)
+    );
+    return distance > 0.15;
+  }
+
+  animateRoseBloom(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+    if (!ctx || this.animationStartTime === null) return;
+    const elapsedTime = performance.now() - this.animationStartTime;
+    const progress = Math.min(1, elapsedTime / 5000); // 5 seconds duration
+
+    const roseSize = 50 * progress;
+    const petalColor = `rgb(${255 * (1 - progress)}, ${100 * progress}, ${100 * progress})`;
+
+    // Draw rose petals
+    ctx.fillStyle = petalColor;
+    ctx.beginPath();
+    ctx.moveTo(x, y - roseSize / 2);
+    ctx.bezierCurveTo(x + roseSize / 4, y - roseSize, x + roseSize / 2, y - roseSize / 4, x, y);
+    ctx.bezierCurveTo(x - roseSize / 2, y - roseSize / 4, x - roseSize / 4, y - roseSize, x, y - roseSize / 2);
+    ctx.fill();
+
+    // Draw inner petals
+    ctx.beginPath();
+    ctx.moveTo(x, y - roseSize / 4);
+    ctx.bezierCurveTo(x + roseSize / 8, y - roseSize / 2, x + roseSize / 4, y - roseSize / 8, x, y);
+    ctx.bezierCurveTo(x - roseSize / 4, y - roseSize / 8, x - roseSize / 8, y - roseSize / 2, x, y - roseSize / 4);
+    ctx.fill();
   }
 }
