@@ -1,0 +1,65 @@
+canvas {
+  width: 640px;
+  height: 480px;
+  touch-action: none;
+  background-color: transparent;
+  position: fixed;
+  left: 0px;
+  top: 0px;
+}
+
+.output_canvas {
+  transform: rotateY(180deg);
+  -webkit-transform: rotateY(180deg);
+  -moz-transform: rotateY(180deg);
+  z-index: 1;
+  position: fixed; /* Already set inline, but safe to have here */
+  pointer-events: none;
+}
+
+video {
+  position: fixed;
+  width: 640px;
+  height: 480px;
+  clear: both;
+  display: block;
+  left: 0px;
+  top: 0px;
+  transform: rotateY(180deg);
+  -webkit-transform: rotateY(180deg);
+  -moz-transform: rotateY(180deg);
+}
+
+@media (max-width: 768px) {
+  /* Make video and all canvas elements full screen */
+  video,
+  canvas {
+    /* This targets both the base canvas and .output_canvas */
+    width: 100vw; /* 100% of viewport width */
+    height: 100vh; /* 100% of viewport height */
+    position: fixed; /* Position relative to the viewport */
+    top: 0;
+    left: 0;
+    object-fit: cover; /* Fill the screen, maintain aspect ratio */
+  }
+
+  /* Specific z-index adjustments for mobile stacking if needed */
+  video {
+    z-index: 0; /* Background */
+    /* transform is kept */
+  }
+
+  canvas {
+    /* Base canvas (if used visually) */
+    z-index: 1; /* Middle layer */
+    /* background-color: transparent; is kept */
+    /* touch-action: none; is kept */
+  }
+
+  .output_canvas {
+    z-index: 2; /* Top layer */
+    /* transform is kept */
+    /* pointer-events: none; is kept */
+    /* width, height, position, top, left, object-fit inherited from 'canvas' rule */
+  }
+}
